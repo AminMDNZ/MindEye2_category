@@ -110,11 +110,20 @@ def test_adapter_roundtrip_is_small_and_lossless():
     full_params = sum(p.numel() for p in model.parameters())
     assert sum(v.numel() for v in sd.values()) < full_params
 
+    # Rebuild the way train.py / predict do: base weights first, then adapters. Wrap
+    # before copying the base weights: LoRALinear keeps the original layer as `.base`, so
+    # an unwrapped model names them `backbone.0.weight` while the trained model names them
+    # `backbone.0.base.weight`. Copying into an unwrapped model with strict=False matched
+    # nothing and silently left `fresh` with its own random weights.
     fresh = Toy()
-    fresh.load_state_dict({k: v for k, v in model.state_dict().items()
-                           if ".lora_" not in k and not k.startswith("ridge.")},
-                          strict=False)
     apply_lora(fresh, LoRAConfig(r=8))
+    loaded = fresh.load_state_dict({k: v for k, v in model.state_dict().items()
+                                    if ".lora_" not in k and not k.startswith("ridge.")},
+                                   strict=False)
+    # strict=False is needed (adapters and ridge come from `sd` below) but must not hide a
+    # naming mismatch: every base weight has to have been copied.
+    assert not loaded.unexpected_keys
+    assert all(".lora_" in k or k.startswith("ridge.") for k in loaded.missing_keys)
     load_adapter_state_dict(fresh, sd)
     assert torch.allclose(fresh(x), expected, atol=1e-5)
 
