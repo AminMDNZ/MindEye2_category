@@ -57,6 +57,10 @@ class ExperimentConfig:
     pretrain: str = "multisubject_1024"
     average_test_repeats: bool = True
     zscore_voxels: bool = True
+    # None -> train on the first `num_sessions` sessions (the paper's setup). A dict
+    # trains on a chosen set of trials instead; see trainsets.py. Example:
+    #   {kind: category, category: animal, rule: only, n_images: 700}
+    train_set: dict | None = None
 
     # model --------------------------------------------------------------------------
     use_prior: bool = True
@@ -103,8 +107,25 @@ class ExperimentConfig:
                 return a
         raise KeyError(f"No arm named {name!r}. Known: {[a.name for a in self.arms]}")
 
+    @property
+    def data_tag(self) -> str:
+        """Names this training set's data files and runs. `1sess` for the session-based
+        setup, so existing workspaces and runs keep their names."""
+        if not self.train_set:
+            return f"{self.num_sessions}sess"
+        from .trainsets import TrainSetSpec
+
+        return TrainSetSpec.from_dict(self.train_set).tag
+
+    def train_set_description(self) -> str:
+        if not self.train_set:
+            return f"{self.num_sessions} session(s) (~{self.num_sessions} hour)"
+        from .trainsets import TrainSetSpec
+
+        return TrainSetSpec.from_dict(self.train_set).describe()
+
     def run_name(self, arm: str, seed: int) -> str:
-        return f"subj{self.subj:02d}_{self.num_sessions}sess_{arm}_seed{seed}"
+        return f"subj{self.subj:02d}_{self.data_tag}_{arm}_seed{seed}"
 
     def to_dict(self) -> dict:
         d = asdict(self)

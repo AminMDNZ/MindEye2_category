@@ -172,6 +172,17 @@ trains nothing and is not part of `run-all`.
   subject and every test image is one of the shared 1,000, and refuses to continue if
   not. It also reports whether MindEye2's trial numbers match NSD's.
 
+**Training on one category (`configs/category_animal.yaml`).** The `train_set` block in
+a config replaces "the first N sessions" with a chosen list of trials: `n_images`
+different images of one category (under one rule), drawn at random with a fixed
+`selection_seed` from every session, each used once at its first viewing. Run the
+stages one at a time (`assets`, `precompute`, `train`, `predict`, `evaluate`); `assets`
+writes `data/subj01_<tag>_selection.json`, listing exactly which images and trials were
+chosen. Everything is named with the training set's tag (e.g.
+`cat-animal-only-700-first-s0`): data files, runs, and `results/<tag>/`. Session-based
+configs keep their original names and `results/` folder, so existing runs are reused and
+never overwritten.
+
 Counting images across sessions needs the subject's whole trial history, which
 `categories` builds first (also available on its own as `cli trials`): every session's
 behaviour table (~9 MB each, ~350 MB for subj01's 40 sessions), grouped by image. Any

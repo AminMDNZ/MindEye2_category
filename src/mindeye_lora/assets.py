@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import tarfile
 import time
 from dataclasses import dataclass
@@ -404,6 +405,20 @@ class AssetPaths:
     meta: Path
 
 
+def _tag(num_sessions: int | None = None, tag: str | None = None) -> str:
+    if tag:
+        return tag
+    return f"{int(num_sessions or 1)}sess"
+
+
+def asset_meta_path(ws, subj: int, tag: str) -> Path:
+    """`subjXX_sessN_meta.json` for session-based data (the original name, so existing
+    workspaces are found), `subjXX_<tag>_meta.json` for any other training set."""
+    m = re.fullmatch(r"(\d+)sess", tag)
+    name = f"subj{subj:02d}_sess{m.group(1)}_meta.json" if m else f"subj{subj:02d}_{tag}_meta.json"
+    return ws["data"] / name
+
+
 def prepare_assets(
     ws,
     subj: int = 1,
@@ -411,17 +426,28 @@ def prepare_assets(
     pretrain: str = "multisubject_1024",
     full_local_hdf5: bool = False,
     force: bool = False,
+    tag: str | None = None,
+    behav_train: np.ndarray | None = None,
+    train_set_info: dict | None = None,
 ) -> AssetPaths:
-    """Download / derive every artifact needed for training and evaluation."""
+    """Download / derive every artifact needed for training and evaluation.
+
+    By default the training trials are the first `num_sessions` sessions. Pass
+    `behav_train` (MindEye2 behav layout) and a `tag` to train on any other set of trials
+    instead, e.g. one category drawn from every session (see trainsets.py).
+    """
     assets, data = ws["assets"], ws["data"]
-    meta_path = data / f"subj{subj:02d}_sess{num_sessions}_meta.json"
+    tag = _tag(num_sessions, tag)
+    if behav_train is not None and re.fullmatch(r"\d+sess", tag):
+        raise ValueError("a custom training set needs its own tag, not a session tag")
+    meta_path = asset_meta_path(ws, subj, tag)
     paths = AssetPaths(
-        behav_train=data / f"subj{subj:02d}_behav_train_{num_sessions}sess.npy",
+        behav_train=data / f"subj{subj:02d}_behav_train_{tag}.npy",
         behav_test=data / f"subj{subj:02d}_behav_test.npy",
-        voxels=data / f"subj{subj:02d}_voxels_{num_sessions}sess.npy",
-        voxel_index=data / f"subj{subj:02d}_voxel_trials_{num_sessions}sess.npy",
-        images=data / f"subj{subj:02d}_images_{num_sessions}sess.npy",
-        image_index=data / f"subj{subj:02d}_coco_idx_{num_sessions}sess.npy",
+        voxels=data / f"subj{subj:02d}_voxels_{tag}.npy",
+        voxel_index=data / f"subj{subj:02d}_voxel_trials_{tag}.npy",
+        images=data / f"subj{subj:02d}_images_{tag}.npy",
+        image_index=data / f"subj{subj:02d}_coco_idx_{tag}.npy",
         pretrain_ckpt=assets / f"{pretrain}_subj{subj:02d}_init.pth",
         meta=meta_path,
     )
@@ -429,19 +455,22 @@ def prepare_assets(
         p.exists() for p in [paths.behav_train, paths.behav_test, paths.voxels, paths.images,
                              paths.pretrain_ckpt]
     ):
-        log.info("Assets already prepared for subj%02d / %d session(s).", subj, num_sessions)
-        return paths
+        if behav_train is None or np.array_equal(np.load(paths.behav_train), behav_train):
+            log.info("Assets already prepared for subj%02d / %s.", subj, tag)
+            return paths
+        log.info("training trials for %s changed; re-preparing its assets", tag)
 
     files = repo_files()
 
     # 1. behaviour tables ------------------------------------------------------------
-    train_behav = []
-    for shard in range(num_sessions):
-        name = WDS_TRAIN_TPL.format(subj=subj, shard=shard)
-        if name not in files:
-            raise FileNotFoundError(f"{name} not in repo — subj{subj:02d} has fewer sessions.")
-        train_behav.append(read_behav_tar(hf_download(name, assets)))
-    behav_train = np.concatenate(train_behav, 0)
+    if behav_train is None:
+        train_behav = []
+        for shard in range(num_sessions):
+            name = WDS_TRAIN_TPL.format(subj=subj, shard=shard)
+            if name not in files:
+                raise FileNotFoundError(f"{name} not in repo — subj{subj:02d} has fewer sessions.")
+            train_behav.append(read_behav_tar(hf_download(name, assets)))
+        behav_train = np.concatenate(train_behav, 0)
     behav_test = read_behav_tar(hf_download(resolve_test_shard(subj, files), assets))
     np.save(paths.behav_train, behav_train)
     np.save(paths.behav_test, behav_test)
@@ -455,7 +484,7 @@ def prepare_assets(
     betas_name = BETAS_TPL.format(subj=subj)
     local_betas = hf_download(betas_name, assets) if full_local_hdf5 else None
     voxels = gather_rows(betas_name, uniq_trials, local_betas,
-                         cache_path=data / f"_fetch_voxels_subj{subj:02d}_{num_sessions}sess.npz")
+                         cache_path=data / f"_fetch_voxels_subj{subj:02d}_{tag}.npz")
     np.save(paths.voxels, voxels.astype(np.float32))
     np.save(paths.voxel_index, uniq_trials)
     log.info("voxels: %s -> %s", voxels.shape, human_bytes(paths.voxels.stat().st_size))
@@ -467,21 +496,23 @@ def prepare_assets(
     uniq_coco = np.unique(coco)
     local_coco = hf_download(COCO_IMAGES, assets) if full_local_hdf5 else None
     images = gather_rows(COCO_IMAGES, uniq_coco, local_coco,
-                         cache_path=data / f"_fetch_images_subj{subj:02d}_{num_sessions}sess.npz")
+                         cache_path=data / f"_fetch_images_subj{subj:02d}_{tag}.npz")
     np.save(paths.images, images)  # float16 [N, 3, 224, 224] in [0, 1]
     np.save(paths.image_index, uniq_coco)
     log.info("images: %s -> %s", images.shape, human_bytes(paths.images.stat().st_size))
 
     # 4. pretrained shared-subject checkpoint -------------------------------------------
-    tpl = PRETRAIN_CKPTS[pretrain]
-    remote = tpl.format(subj=subj)
-    raw = hf_download(remote, assets)
-    slim_checkpoint(raw, paths.pretrain_ckpt)
-    if paths.pretrain_ckpt.exists() and raw.exists() and raw != paths.pretrain_ckpt:
-        raw.unlink()  # reclaim ~2 GB; the slim file is all we ever need
-        log.info("removed raw checkpoint after slimming")
+    # Shared by every training set; only fetched (2.9 GB) if the slim copy is missing.
+    if not paths.pretrain_ckpt.exists():
+        tpl = PRETRAIN_CKPTS[pretrain]
+        remote = tpl.format(subj=subj)
+        raw = hf_download(remote, assets)
+        slim_checkpoint(raw, paths.pretrain_ckpt)
+        if paths.pretrain_ckpt.exists() and raw.exists() and raw != paths.pretrain_ckpt:
+            raw.unlink()  # reclaim ~2 GB; the slim file is all we ever need
+            log.info("removed raw checkpoint after slimming")
 
-    for stale in data.glob(f"_fetch_*_subj{subj:02d}_{num_sessions}sess.npz"):
+    for stale in data.glob(f"_fetch_*_subj{subj:02d}_{tag}.npz"):
         stale.unlink(missing_ok=True)   # only needed while a fetch is in flight
 
     write_json(
@@ -489,6 +520,8 @@ def prepare_assets(
         {
             "subj": subj,
             "num_sessions": num_sessions,
+            "tag": tag,
+            "train_set": train_set_info,
             "pretrain": pretrain,
             "num_voxels": int(voxels.shape[1]),
             "n_train_trials": int(len(behav_train)),
@@ -497,12 +530,14 @@ def prepare_assets(
             "files": {k: str(v) for k, v in paths.__dict__.items()},
         },
     )
-    ws.mark_done(f"assets_subj{subj:02d}_{num_sessions}sess")
+    ws.mark_done(f"assets_subj{subj:02d}_{tag}")
     return paths
 
 
-def load_asset_meta(ws, subj: int, num_sessions: int) -> dict:
-    meta = read_json(ws["data"] / f"subj{subj:02d}_sess{num_sessions}_meta.json")
+def load_asset_meta(ws, subj: int, tag: str | int) -> dict:
+    """`tag` is the config's `data_tag` (an int is read as a number of sessions)."""
+    tag = _tag(num_sessions=tag) if isinstance(tag, int) else tag
+    meta = read_json(asset_meta_path(ws, subj, tag))
     if meta is None:
         raise FileNotFoundError("Assets not prepared. Run `mindeye-lora assets` first.")
     return meta

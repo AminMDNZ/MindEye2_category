@@ -35,7 +35,28 @@ def _ws(args, mirror_data: bool = False):
         from .env import mirror_data_locally
 
         ws = mirror_data_locally(ws)
+    _scope_results(ws, _cfg(args))
     return ws
+
+
+def _scope_results(ws, cfg: ExperimentConfig) -> None:
+    """Keep each training set's statistics, figures and report in their own folder.
+
+    Session-based configs keep writing to `results/` exactly as before. Any other
+    training set (e.g. a category) writes to `results/<data_tag>/`, so running it can
+    never overwrite the published experiment's REPORT.md or statistics.
+    """
+    import re
+
+    tag = cfg.data_tag
+    if re.fullmatch(r"\d+sess", tag):
+        return
+    base = ws.paths["results"] / tag
+    ws.paths["results"] = base
+    ws.paths["figures"] = base / "figures"
+    ws.paths["reports"] = base / "reports"
+    for key in ("results", "figures", "reports"):
+        ws.paths[key].mkdir(parents=True, exist_ok=True)
 
 
 def _cfg(args) -> ExperimentConfig:
@@ -58,7 +79,7 @@ def _device() -> str:
 
 
 def _emb_path(ws, cfg):
-    return ws["data"] / f"subj{cfg.subj:02d}_clip_{cfg.num_sessions}sess.npy"
+    return ws["data"] / f"subj{cfg.subj:02d}_clip_{cfg.data_tag}.npy"
 
 
 def safe_torch_load(path, **kw):
@@ -142,10 +163,19 @@ def cmd_assets(args):
     _check_gpu_fits_config(cfg, force=args.ignore_memory_check)
     from .assets import prepare_assets
 
+    behav_train, info = None, None
+    if cfg.train_set:
+        from .trainsets import TrainSetSpec, prepare_train_set
+
+        behav_train, info = prepare_train_set(ws, cfg.subj,
+                                              TrainSetSpec.from_dict(cfg.train_set))
+        info = {k: v for k, v in info.items() if not k.startswith(("selected_", "category_test"))}
     paths = prepare_assets(
         ws, subj=cfg.subj, num_sessions=cfg.num_sessions, pretrain=cfg.pretrain,
         full_local_hdf5=args.full_hdf5, force=args.force,
+        tag=cfg.data_tag, behav_train=behav_train, train_set_info=info,
     )
+    print(f"training set: {cfg.train_set_description()}  [{cfg.data_tag}]")
     print("assets ready:")
     for k, v in asdict(paths).items():
         p = Path(v)
@@ -190,7 +220,7 @@ def cmd_precompute(args):
     from .assets import load_asset_meta
     from .embeddings import embedding_stats, precompute_embeddings
 
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     out = precompute_embeddings(
         images_path=meta["files"]["images"],
         out_path=_emb_path(ws, cfg),
@@ -200,7 +230,7 @@ def cmd_precompute(args):
         force=args.force,
     )
     print(json.dumps(embedding_stats(out), indent=2))
-    ws.mark_done(f"precompute_subj{cfg.subj:02d}_{cfg.num_sessions}sess")
+    ws.mark_done(f"precompute_subj{cfg.subj:02d}_{cfg.data_tag}")
 
 
 def cmd_verify(args):
@@ -210,7 +240,7 @@ def cmd_verify(args):
     from .lora import LoRAConfig, find_target_linears
     from .model_factory import create_mindeye, module_tree
 
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     model, arch, report = create_mindeye(
         ckpt_path=meta["files"]["pretrain_ckpt"], num_voxels=meta["num_voxels"],
         upstream_dir=ws["upstream"], upstream_ref=cfg.upstream_ref,
@@ -300,7 +330,7 @@ def cmd_predict(args):
     from .train import build_arm_model
 
     device = _device()
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     paths = AssetPaths(**{k: Path(v) for k, v in meta["files"].items()})
     train_sub, test_sub, _ = build_subsets(paths, cfg.average_test_repeats)
     if cfg.zscore_voxels:
@@ -423,7 +453,7 @@ def cmd_evaluate(args):
     )
     from .recon import load_ground_truth
 
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     paths = AssetPaths(**{k: Path(v) for k, v in meta["files"].items()})
     suite = None
 
@@ -589,7 +619,7 @@ def cmd_report(args):
 
     # qualitative grid, if any arm produced reconstructions
     recons_by_arm, gt = {}, None
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     paths = AssetPaths(**{k: Path(v) for k, v in meta["files"].items()})
     for a in cfg.arms:
         p = ws.run_dir(cfg.run_name(a.name, int(cfg.recon_seed))) / "reconstructions.pt"
@@ -626,7 +656,7 @@ def cmd_report(args):
 
     cfg_summary = {
         "subject": cfg.subj,
-        "training data": f"{cfg.num_sessions} session(s) (~{cfg.num_sessions} hour)",
+        "training data": cfg.train_set_description(),
         "pretrained init": cfg.pretrain,
         "epochs": cfg.epochs,
         "batch size": cfg.batch_size,

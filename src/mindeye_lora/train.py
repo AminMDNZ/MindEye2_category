@@ -74,7 +74,7 @@ def build_arm_model(cfg: ExperimentConfig, arm: ArmConfig, num_voxels: int, ws, 
     """Construct the pretrained model and configure it for one arm."""
     from .assets import load_asset_meta
 
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     ckpt = Path(meta["files"]["pretrain_ckpt"])
     model, arch, report = create_mindeye(
         ckpt_path=ckpt,
@@ -199,7 +199,7 @@ def train_arm(
             return TrainResult(**done)
 
     seed_everything(seed, deterministic_algorithms=False)
-    meta = load_asset_meta(ws, cfg.subj, cfg.num_sessions)
+    meta = load_asset_meta(ws, cfg.subj, cfg.data_tag)
     paths_meta = meta["files"]
 
     # ---- data -----------------------------------------------------------------------
@@ -209,7 +209,7 @@ def train_arm(
     train_sub, test_sub, _ = build_subsets(paths, average_test_repeats=cfg.average_test_repeats)
     if cfg.zscore_voxels:
         normalise_voxels(train_sub, test_sub)
-    emb_path = ws["data"] / f"subj{cfg.subj:02d}_clip_{cfg.num_sessions}sess.npy"
+    emb_path = ws["data"] / f"subj{cfg.subj:02d}_clip_{cfg.data_tag}.npy"
     if not emb_path.exists():
         raise FileNotFoundError(
             f"{emb_path} missing — run `mindeye-lora precompute` before training."
