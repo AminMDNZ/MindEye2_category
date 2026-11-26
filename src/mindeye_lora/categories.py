@@ -521,4 +521,3 @@ def format_category_table(result: dict) -> str:
     if sel.get("eligible"):
         lines.append(f"  eligible under '{sel['rule']}': {', '.join(sel['eligible'])}")
     return "\n".join(lines)
-git add -A && git commit -m "Step 2: train on 700 animal-only images" && git push
