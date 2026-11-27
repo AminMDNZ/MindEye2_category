@@ -56,6 +56,11 @@ ${PIP} \
 echo "→ dalle2-pytorch (--no-deps, so torch is left alone)"
 ${PIP} --no-deps "dalle2-pytorch==1.15.6"
 
+echo "→ bitsandbytes (every shipped config uses optimizer: adamw8bit)"
+# Used to be a separate `pip install` cell in the notebook, so running stages by hand
+# without the notebook failed at the start of training. --no-deps keeps torch untouched.
+${PIP} --no-deps "bitsandbytes>=0.43"
+
 echo "→ this package"
 ${PIP} -e .
 
