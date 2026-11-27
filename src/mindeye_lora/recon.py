@@ -516,8 +516,10 @@ def reconstruct_for_run(
     num_steps: int = 38,
     batch_size: int = 4,
     unclip_dir: Path | None = None,
+    positions: np.ndarray | None = None,
 ) -> Path | None:
-    """Decode the first `n_images` predicted embeddings of one run."""
+    """Decode the first `n_images` predicted embeddings of one run, or exactly the
+    store positions in `positions` (e.g. one category's test images) when given."""
     if decoder == "none":
         log.info("decoder disabled — skipping reconstruction.")
         return None
@@ -529,8 +531,9 @@ def reconstruct_for_run(
     source = PredictionStore.embedding(preds)
     # np.array(...) rather than ascontiguousarray: the memmap slice is read-only and
     # torch.from_numpy warns loudly about non-writable buffers.
-    emb = torch.from_numpy(np.array(source[:n_images], dtype=np.float32))
-    rows = torch.from_numpy(np.asarray(preds["rows"][:n_images]))
+    pick = np.asarray(positions, dtype=np.int64) if positions is not None else slice(0, n_images)
+    emb = torch.from_numpy(np.array(source[pick], dtype=np.float32))
+    rows = torch.from_numpy(np.asarray(preds["rows"][pick]))
 
     from .upstream import load_upstream
 

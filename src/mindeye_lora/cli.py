@@ -493,6 +493,32 @@ def cmd_evaluate(args):
                      float(np.mean(metrics["two_way_clip"])), summary["fwd_top1"])
 
 
+def cmd_compare_category(args):
+    """Step 3: the category-trained run vs the session-1 run, on the category's test
+    images, the other test images and all of them. Reads saved per-image scores (and,
+    for the within-category check, saved predictions); trains nothing."""
+    ws, cfg = _ws(args), _cfg(args)
+    from .compare_category import format_result, run_comparison, save_result
+
+    res = run_comparison(ws, cfg, baseline_tag=args.baseline_tag, arm=args.arm_name,
+                         seed=args.compare_seed, within=not args.no_within)
+    print(format_result(res))
+    print(f"\nsaved -> {save_result(ws, res)}")
+
+
+def cmd_recon_category(args):
+    """Decode the category's test images from both the category-trained and the
+    session-1 run (SDXL unCLIP, ~11 s/image on a T4, resumable), score them with the
+    paper's image metrics, compare pairwise and draw them side by side."""
+    ws, cfg = _ws(args), _cfg(args)
+    from .compare_category import format_recon_result, recon_category
+
+    res = recon_category(ws, cfg, baseline_tag=args.baseline_tag, arm=args.arm_name,
+                         seed=args.compare_seed, n=args.n_images, num_steps=args.num_steps,
+                         device=_device(), force=args.force)
+    print(format_recon_result(res))
+
+
 def cmd_compare(args):
     ws, cfg = _ws(args), _cfg(args)
     from .evaluate import load_per_sample
@@ -814,6 +840,27 @@ def build_parser() -> argparse.ArgumentParser:
     ct.add_argument("--force", action="store_true", help="rebuild the labels")
     ct.set_defaults(func=cmd_categories)
 
+    cc = add("compare-category",
+             help="step 3: category-trained run vs session-1 run on the same test images")
+    cc.add_argument("--baseline_tag", default="1sess",
+                    help="training set of the run to compare against (default: 1sess)")
+    cc.add_argument("--arm_name", default=None, help="arm to compare (default: the config's first)")
+    cc.add_argument("--compare_seed", type=int, default=0, help="seed of both runs (default 0)")
+    cc.add_argument("--no_within", action="store_true",
+                    help="skip the within-category re-scoring (needs no GPU then)")
+    cc.set_defaults(func=cmd_compare_category)
+
+    rcc = add("recon-category",
+              help="reconstruct the category's test images from both runs and compare")
+    rcc.add_argument("--baseline_tag", default="1sess")
+    rcc.add_argument("--arm_name", default=None)
+    rcc.add_argument("--compare_seed", type=int, default=0)
+    rcc.add_argument("--n_images", type=int, default=None,
+                     help="decode a fixed random subset instead of all category test images")
+    rcc.add_argument("--num_steps", type=int, default=38)
+    rcc.add_argument("--force", action="store_true")
+    rcc.set_defaults(func=cmd_recon_category)
+
     pc = add("precompute")
     pc.add_argument("--force", action="store_true")
     pc.set_defaults(func=cmd_precompute)
@@ -906,7 +953,9 @@ def main(argv=None):
                           ("tree", False), ("lenient", False), ("skip", None),
                           ("ignore_memory_check", False), ("strict_decoder", False),
                           ("max_sessions", None), ("n_train", 688),
-                          ("min_test", 100), ("rule", "dominant"), ("category", None)]:
+                          ("min_test", 100), ("rule", "dominant"), ("category", None),
+                          ("baseline_tag", "1sess"), ("arm_name", None), ("compare_seed", 0),
+                          ("no_within", False)]:
         if not hasattr(args, name):
             setattr(args, name, default)
     args.func(args)

@@ -422,6 +422,7 @@ src/mindeye_lora/
   trials.py         all-sessions trial pool, grouped by image
   categories.py     COCO supercategory per image, per-category counts, selection
   trainsets.py      choose training trials by category (train_set in the config)
+  compare_category.py  category run vs session-1 run on the category's test images
   embeddings.py     CLIP ViT-bigG/14 token embedding cache
   lora.py           LoRALinear, regex targeting, merging, adapter checkpoints
   model_factory.py  architecture inference + strict pretrained loading
@@ -435,7 +436,7 @@ src/mindeye_lora/
   report.py         figures + REPORT.md
   cli.py            stage orchestration
 configs/            smoke · main · paper_scale · category_animal
-tests/              test_lora.py · test_stats.py · test_retrieval.py · test_trials.py · test_categories.py · test_trainsets.py
+tests/              test_lora.py · test_stats.py · test_retrieval.py · test_trials.py · test_categories.py · test_trainsets.py · test_compare_category.py · test_env.py
 docs/               GUIDE.md · EXPERIMENT_DESIGN.md · RESULTS.md · figures/
 ```
 

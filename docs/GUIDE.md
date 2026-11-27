@@ -183,6 +183,21 @@ chosen. Everything is named with the training set's tag (e.g.
 configs keep their original names and `results/` folder, so existing runs are reused and
 never overwritten.
 
+**Comparing with the session-1 run (`cli compare-category`).** Pairs the category
+run with the session-1 run of the same arm and seed, image by image, and reports the
+paper's paired statistics on the category's test images (the primary comparison, fixed
+in advance), the other test images and all of them. It adds one view: two-way
+identification re-scored among the category's test images only, i.e. telling an animal
+from other animals rather than from mostly non-animals. Output goes to
+`results/<tag>/category_comparison.json`.
+
+**Reconstructions of the category images (`cli recon-category`).** Decodes the
+category's test images from both runs with the SDXL unCLIP decoder (~11 s per image on
+a T4; resumable), scores them with the paper's eight image metrics, compares the runs
+pairwise and draws ground truth, session-1 and category-trained side by side
+(`results/<tag>/figures/category_reconstructions.png`). `--n_images N` decodes a fixed
+random subset instead of all of them.
+
 Counting images across sessions needs the subject's whole trial history, which
 `categories` builds first (also available on its own as `cli trials`): every session's
 behaviour table (~9 MB each, ~350 MB for subj01's 40 sessions), grouped by image. Any
