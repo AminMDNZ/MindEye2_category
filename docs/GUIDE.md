@@ -192,8 +192,8 @@ from other animals rather than from mostly non-animals. Output goes to
 `results/<tag>/category_comparison.json`.
 
 **Reconstructions of the category images (`cli recon-category`).** Decodes the
-category's test images from both runs with the SDXL unCLIP decoder (~11 s per image on
-a T4; resumable), scores them with the paper's eight image metrics, compares the runs
+category's test images from both runs with the SDXL unCLIP decoder (~30 s per image
+measured on a T4, so ~1.5 h per run for 179 images; resumable), scores them with the paper's eight image metrics, compares the runs
 pairwise and draws ground truth, session-1 and category-trained side by side
 (`results/<tag>/figures/category_reconstructions.png`). `--n_images N` decodes a fixed
 random subset instead of all of them.

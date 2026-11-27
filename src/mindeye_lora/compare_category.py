@@ -262,18 +262,37 @@ def recon_category(ws, cfg, baseline_tag: str = "1sess", arm: str | None = None,
 
     runs = {"session-1": (baseline_tag, ws["runs"] / f"subj{cfg.subj:02d}_{baseline_tag}_{arm}_seed{seed}"),
             "category-trained": (tag, ws["runs"] / f"subj{cfg.subj:02d}_{tag}_{arm}_seed{seed}")}
+    from .evaluate import PredictionStore
+
+    # Check every run before decoding anything: decoding one run takes ~1.5 h on a T4,
+    # and a broken second run should not be discovered only after the first is done.
+    for label, (run_tag, run_dir) in runs.items():
+        if not PredictionStore.is_complete(run_dir / "predictions"):
+            raise FileNotFoundError(
+                f"The predictions of {run_dir.name} are missing or incomplete on Drive "
+                "(usually the runtime stopped before Drive finished saving them). Run "
+                "`predict` again with the same config: it detects this and recomputes "
+                "(~18 min on a T4). Then rerun this command WITHOUT --force; finished "
+                "reconstructions are kept."
+            )
+
     recons, ids_by_run = {}, {}
     for label, (run_tag, run_dir) in runs.items():
-        if not (run_dir / "predictions" / "meta.json").exists():
-            raise FileNotFoundError(f"{run_dir.name} has no predictions; run `predict` first")
         out = run_dir / f"reconstructions_{tag}.pt"
         pos, ids = category_positions(ws, cfg.subj, run_tag, run_dir, category_ids, n=n)
-        if force or not out.exists():
+        d = None
+        if out.exists() and not force:
+            try:
+                d = torch.load(out, map_location="cpu", weights_only=False)
+                log.info("reusing %d reconstructions for %s", len(d["recons"]), run_dir.name)
+            except Exception as exc:     # truncated by an unfinished Drive upload
+                log.warning("%s is unreadable (%s); decoding again", out.name, exc)
+        if d is None:
             log.info("decoding %d %s test images for %s", len(pos), tag, run_dir.name)
             reconstruct_for_run(run_dir / "predictions", out, ws, n_images=len(pos),
                                 decoder="sdxl_unclip", device=device, num_steps=num_steps,
                                 batch_size=1, positions=pos)
-        d = torch.load(out, map_location="cpu", weights_only=False)
+            d = torch.load(out, map_location="cpu", weights_only=False)
         got = nsd_ids_for_rows(ws, cfg.subj, run_tag, d["rows"].numpy())
         if not np.array_equal(got, ids):
             raise ValueError(f"{out.name} holds other images than requested; rerun with --force")
