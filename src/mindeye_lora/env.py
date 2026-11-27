@@ -94,27 +94,55 @@ class Workspace:
         return "\n".join(lines)
 
 
-def mount_drive(mountpoint: str = "/content/drive") -> bool:
-    """Mount Google Drive if we are on Colab and it is not already mounted."""
+DRIVE_MOUNT = "/content/drive"
+
+
+def drive_mounted(mountpoint: str = DRIVE_MOUNT) -> bool:
+    """True only for a real Drive mount. A plain folder at /content/drive/MyDrive (e.g.
+    one created by `mkdir -p` before mounting) is NOT Drive: files written there live on
+    Colab's temporary disk and vanish when the runtime disconnects."""
+    return os.path.ismount(mountpoint)
+
+
+def mount_drive(mountpoint: str = DRIVE_MOUNT) -> bool:
+    """Make sure Google Drive is really mounted when running on Colab.
+
+    Mounting needs the interactive notebook kernel, so it is attempted only there. From
+    `!python -m ...` (a subprocess) Drive must already be mounted by a notebook cell. If
+    it is not, stop with instructions instead of silently saving to temporary storage.
+    """
     if not in_colab():
         return False
-    if os.path.ismount(mountpoint) or os.path.exists(f"{mountpoint}/MyDrive"):
+    if drive_mounted(mountpoint):
         return True
-    try:
-        from google.colab import drive  # type: ignore
+    if "ipykernel" in sys.modules:
+        try:
+            from google.colab import drive  # type: ignore
 
-        drive.mount(mountpoint)
-        return True
-    except Exception as exc:  # pragma: no cover
-        log.warning("Could not mount Drive (%s); falling back to local storage.", exc)
-        return False
+            drive.mount(mountpoint)
+        except Exception as exc:  # pragma: no cover
+            log.warning("Could not mount Drive (%s).", exc)
+        if drive_mounted(mountpoint):
+            return True
+    stub = os.path.exists(f"{mountpoint}/MyDrive")
+    raise SystemExit(
+        "Google Drive is not mounted, so anything saved now would be lost when Colab "
+        "disconnects.\n"
+        "Run this in a notebook cell first (a Python cell, not with !python):\n\n"
+        "    from google.colab import drive\n"
+        "    drive.mount('/content/drive')\n"
+        + (f"\n{mountpoint}/MyDrive exists but is a plain local folder, not your Drive, so "
+           "mounting will fail until it is gone: use Runtime -> Disconnect and delete "
+           "runtime, then mount Drive before running anything else.\n" if stub else "")
+        + "\nTo work on Colab's temporary disk on purpose, pass --no-drive."
+    )
 
 
 def default_root() -> Path:
     if os.environ.get("MINDEYE_LORA_ROOT"):
         return Path(os.environ["MINDEYE_LORA_ROOT"])
-    if in_colab() and os.path.exists("/content/drive/MyDrive"):
-        return Path("/content/drive/MyDrive/mindeye2_lora")
+    if in_colab() and drive_mounted():
+        return Path(f"{DRIVE_MOUNT}/MyDrive/mindeye2_lora")
     return Path.cwd() / "workspace"
 
 

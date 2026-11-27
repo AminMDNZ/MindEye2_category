@@ -42,8 +42,13 @@ def test_8bit_optimizer_cuts_moment_memory_fourfold():
     assert int8.total_bytes < fp32.total_bytes
 
 
-def test_preflight_passes_when_no_gpu_is_present():
-    # gpu_capacity_bytes() returns None off-GPU, so preflight must not raise
+def test_preflight_passes_when_no_gpu_is_present(monkeypatch):
+    # gpu_capacity_bytes() returns None off-GPU, so preflight must not raise. Simulate
+    # "no GPU" explicitly: on a GPU runtime the real card would be measured, and this
+    # 2.1B-parameter estimate (paper scale) genuinely does not fit a 16 GB T4.
+    from mindeye_lora import capacity
+
+    monkeypatch.setattr(capacity, "gpu_capacity_bytes", lambda: None)
     est = preflight("lora_r16", 2_100_000_000, 70_000_000, strict=True)
     assert est.total_bytes > 0
 

@@ -13,6 +13,24 @@
 set -euo pipefail
 
 ROOT="${MINDEYE_LORA_ROOT:-/content/drive/MyDrive/mindeye2_lora}"
+
+# Never create anything under /content/drive unless Drive is really mounted there: a
+# `mkdir -p` before mounting makes a plain local "MyDrive" folder that looks like Drive,
+# so the pipeline would happily save hours of work to temporary disk, and Drive itself
+# could then no longer be mounted on that folder.
+if [[ "${ROOT}" == /content/drive/* ]] && ! mountpoint -q /content/drive; then
+  echo "✗ Google Drive is not mounted. Run this in a notebook cell first, then re-run setup:"
+  echo ""
+  echo "    from google.colab import drive"
+  echo "    drive.mount('/content/drive')"
+  echo ""
+  if [[ -d /content/drive/MyDrive ]]; then
+    echo "  /content/drive/MyDrive already exists as a plain local folder (from an older"
+    echo "  setup), so mounting will fail: Runtime -> Disconnect and delete runtime first."
+  fi
+  exit 1
+fi
+
 export PIP_CACHE_DIR="${ROOT}/cache/pip"
 mkdir -p "${PIP_CACHE_DIR}"
 
