@@ -284,9 +284,17 @@ def recon_category(ws, cfg, baseline_tag: str = "1sess", arm: str | None = None,
         if out.exists() and not force:
             try:
                 d = torch.load(out, map_location="cpu", weights_only=False)
-                log.info("reusing %d reconstructions for %s", len(d["recons"]), run_dir.name)
             except Exception as exc:     # truncated by an unfinished Drive upload
                 log.warning("%s is unreadable (%s); decoding again", out.name, exc)
+            if d is not None:
+                saved = nsd_ids_for_rows(ws, cfg.subj, run_tag, d["rows"].numpy())
+                if np.array_equal(saved, ids):
+                    log.info("reusing %d reconstructions for %s", len(saved), run_dir.name)
+                else:   # e.g. a --n_images quick look saved earlier: redo THIS run only
+                    log.info("%s holds %d other images (an earlier --n_images run?); "
+                             "decoding the %d requested ones", out.name, len(saved), len(ids))
+                    d = None
+                    out.unlink(missing_ok=True)
         if d is None:
             log.info("decoding %d %s test images for %s", len(pos), tag, run_dir.name)
             reconstruct_for_run(run_dir / "predictions", out, ws, n_images=len(pos),
